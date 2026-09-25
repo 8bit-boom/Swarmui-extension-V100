@@ -1,12 +1,12 @@
 # SwarmUI V100 Compatibility Extension
 
-Patches SwarmUI's ComfyUI workflows so they run correctly on **NVIDIA Volta (sm_70)** cards — Tesla V100, Titan V.
+Patches SwarmUI's ComfyUI workflows so they run correctly on **pre-Ampere NVIDIA cards (compute capability 7.x)** — Volta (Tesla V100, Titan V) and Turing (RTX 20xx, T4), which all lack bf16 compute.
 
 ## Why the V100 needs special handling
 
 The V100 is still a capable card (16/32 GB HBM2, fast FP16 tensor cores), but it predates a few things modern pipelines assume:
 
-1. **No bf16 compute.** Volta only supports FP16/FP32. bf16 tensors get *silently emulated via fp32*, which is ~4x slower, spikes VRAM, and some nodes just crash with errors like `RuntimeError: expected scalar type Half but found BFloat16`. Some newer models (FLUX-family, video models) whitelist only bf16/fp32, so on a V100 ComfyUI silently falls back to fp32 and crawls.
+1. **No bf16 compute.** Volta only supports FP16/FP32. bf16 tensors get *silently emulated via fp32*, which is ~4x slower, spikes VRAM, and some nodes just crash with errors like `RuntimeError: expected scalar type Half but found BFloat16`. Some newer models (FLUX-family, video models) whitelist only bf16/fp32, so on a V100 ComfyUI silently falls back to fp32 and crawls. (Turing/7.5 has the same limitation — bf16 only arrived with Ampere/sm_80.)
 2. **cu130 PyTorch wheels dropped sm_70.** If your torch is a cu130 build, every CUDA op fails with `no kernel image is available for execution on the device`, even though `torch.cuda.is_available()` returns True. Use a **cu128 (or older)** build:
    ```bash
    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
@@ -15,13 +15,13 @@ The V100 is still a capable card (16/32 GB HBM2, fast FP16 tensor cores), but it
 
 ## What this extension does
 
-- At startup, runs `nvidia-smi` to detect a Volta-class GPU (compute capability 7.x).
+- At startup, runs `nvidia-smi` to detect a pre-Ampere GPU (compute capability 7.x — Volta 7.0 or Turing 7.5; both lack bf16, which only arrived with Ampere/sm_80).
 - Adds an **Advanced Options** group "V100 / Volta Compatibility" to the generation page:
-  - **V100 Compatibility Patch** — on by default when a Volta GPU is detected. Inserts ComfyUI's core `ModelComputeDtype` node immediately after base model loading (model-gen step priority `-50`, after the loader at `-100` but before sampling), so every downstream node (sampler, refiner, etc.) gets a V100-safe dtype.
+  - **V100 Compatibility Patch** — on by default when a 7.x GPU is detected. Inserts ComfyUI's core `ModelComputeDtype` node immediately after base model loading (model-gen step priority `-50`, after the loader at `-100` but before sampling), so every downstream node (sampler, refiner, etc.) gets a bf16-free dtype.
   - **V100 Precision** — `fp16` (default, ~4x faster on Volta tensor cores) or `fp32` (safe fallback for the few models that NaN/overflow in fp16).
 - Registers **ComfyUI Flash-Attention V100** (the experimental node pack) as an installable feature, so it can be installed from within SwarmUI after you install this extension — no manual `custom_nodes` cloning.
-- Registers **ComfyUI-GGUF KREA-2** ([RealRebelAI fork](https://github.com/RealRebelAI/ComfyUI-GGUF_KREA-2)) as an installable feature for **Krea 2 GGUF** support — see the [detailed guide](GUIDE.md). Krea 2 itself (Raw/Turbo) is already natively supported by SwarmUI; GGUF just needs this loader fork (the upstream city96 pack doesn't parse Krea 2 ops yet, and the two can't coexist — same node class names).
-- On non-Volta machines it stays completely inert unless you manually enable the toggle.
+- Registers **ComfyUI-GGUF KREA-2** ([RealRebelAI fork](https://github.com/RealRebelAI/ComfyUI-GGUF_KREA-2)) as an installable feature for **Krea 2 GGUF** support — see the [detailed guide](GUIDE.md). Krea 2 itself (Raw/Turbo) is already natively supported by SwarmUI; GGUF just needs this loader fork. **Conflict warning**: the fork and SwarmUI's built-in `gguf` (city96) entry register identical node class names and must never be installed together. The built-in entry still appears in the installable-features list — an extension cannot hide or unregister someone else's entry, so this is enforced by naming/documentation, not by removing the option (the feature is named "… (fork — replaces built-in 'gguf')"). If both are ever installed, delete the city96 folder from ComfyUI's `custom_nodes` and restart.
+- On non-7.x machines it stays completely inert unless you manually enable the toggle.
 
 ## Installation
 
