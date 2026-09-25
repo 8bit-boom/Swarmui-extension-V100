@@ -26,8 +26,9 @@ namespace V100Compat;
 ///
 /// It also registers related ComfyUI node packs as opt-in installable features:
 /// - ComfyUI Flash-Attention V100 (experimental Volta FlashAttention node pack)
-/// - ComfyUI-GGUF (city96) + ComfyUI-TJ_NODE (Krea2 Qwen3-VL GGUF TE loader)
-///   for Krea 2 GGUF support. Krea 2 itself is natively supported by SwarmUI.
+/// - ComfyUI-GGUF KREA-2 (RealRebelAI fork) for Krea 2 GGUF support
+///   (upstream city96/ComfyUI-GGUF doesn't parse Krea 2 ops yet, city96#464,
+///   and the fork shares node/class names with upstream - do NOT install both).
 /// </summary>
 public class V100CompatExtension : Extension
 {
@@ -103,17 +104,14 @@ public class V100CompatExtension : Extension
             "NetVoobrazhenia"));
 
         // Krea 2 GGUF support: SwarmUI core already detects Krea 2 models (Raw and Turbo),
-        // but loading GGUF files needs city96's GGUF loader pack, and Krea 2's Qwen3-VL text
-        // encoder in GGUF form is gated behind an extra loader node (city96's pack refuses
-        // unrecognized architectures). Register both as opt-in installable features.
-        InstallableFeatures.RegisterInstallableFeature(new("ComfyUI-GGUF",
-            "comfyui-gguf",
-            "https://github.com/city96/ComfyUI-GGUF",
-            "city96"));
-        InstallableFeatures.RegisterInstallableFeature(new("ComfyUI TJ_NODE (Krea2 CLIP GGUF loader)",
-            "comfyui-tj-node",
-            "https://github.com/designloves2/ComfyUI-TJ_NODE",
-            "designloves2"));
+        // but upstream city96/ComfyUI-GGUF doesn't parse Krea 2's ops yet (city96#464).
+        // The RealRebelAI/ComfyUI-GGUF_KREA-2 fork is a drop-in replacement with Krea 2
+        // support (incl. the Qwen3-VL GGUF text encoder). It shares node/class names with
+        // the upstream pack - DO NOT install both; this one supersedes it.
+        InstallableFeatures.RegisterInstallableFeature(new("ComfyUI-GGUF KREA-2 (fork)",
+            "comfyui-gguf-krea2",
+            "https://github.com/RealRebelAI/ComfyUI-GGUF_KREA-2",
+            "RealRebelAI"));
 
         Logs.Init("V100Compat extension loaded.");
     }
