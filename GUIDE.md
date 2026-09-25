@@ -73,7 +73,7 @@ Modern PyTorch **cu130 builds dropped sm_70**. With a cu130 torch, SwarmUI start
    - Use **`launch-dev`** (rebuilds on every launch — use this while developing/tweaking).
 3. Verify in the log at startup — you should see:
    ```
-   [Init] V100Compat: Volta (sm_70) GPU detected...
+   [Init] V100Compat: pre-Ampere GPU (compute capability 7.x, no bf16) detected...
    [Init] V100Compat extension loaded.
    ```
    If you only see the second line, GPU detection failed (nvidia-smi not on PATH) — the extension still works, but the patch defaults to OFF; enable it manually per Part 4.
@@ -83,7 +83,7 @@ Modern PyTorch **cu130 builds dropped sm_70**. With a cu130 torch, SwarmUI start
 
 ## Part 4 — Configure the V100 dtype patch
 
-1. Under **V100 / Volta Compatibility**, make sure **V100 Compatibility Patch** is on (it's on by default when a Volta GPU was detected).
+1. Under **V100 / Volta Compatibility**, make sure **V100 Compatibility Patch** is on (it's on by default when a 7.x GPU was detected).
 2. Keep **V100 Precision = fp16** (default) — this routes the loaded model through ComfyUI's `ModelComputeDtype` node before sampling, so no bf16 ops reach the GPU.
 3. Generate a test image with any standard model (e.g. an SDXL checkpoint) before touching Krea 2. If you get black images or NaN warnings for a specific model, set **V100 Precision = fp32** for that model only (per-model presets work well for this).
 
@@ -151,14 +151,14 @@ GGUF trades speed for lower VRAM. Krea 2's GGUF files need a loader that isn't i
 
 Steps for everyone else:
 
-1. In SwarmUI's installable features list, install **ComfyUI-GGUF KREA-2 (fork)** (registered by this extension). If you previously installed city96's pack, delete its folder from the ComfyUI `custom_nodes` directory first.
+1. In SwarmUI's installable features list, install **ComfyUI-GGUF KREA-2 (fork — replaces built-in 'gguf')** (registered by this extension). Note SwarmUI's built-in `gguf` (city96) entry will also appear in that list — an extension can't hide someone else's entry — so pick the fork entry, never the built-in one. If city96's pack was previously installed, delete its folder from the ComfyUI `custom_nodes` directory first.
 2. Restart the backend.
-3. Download the GGUF files (see the links and community quants discussed in [city96/ComfyUI-GGUF issue #464](https://github.com/city96/ComfyUI-GGUF/issues/464)):
+3. Download the GGUF files (community quants for Krea 2 are discussed in [city96/ComfyUI-GGUF issue #464](https://github.com/city96/ComfyUI-GGUF/issues/464)):
    - A Krea 2 (Raw or Turbo) GGUF diffusion model → `diffusion_models/`
    - Qwen3-VL 4B GGUF + its matching `.mmproj` file → `text_encoders/` (both files, same folder)
    - The VAE stays the normal `qwen_image_vae.safetensors` in `vae/`
    For a 16 GB V100, start with Q6_K/Q8_0; Q4_K_M or lower if you OOM. Community reports run 2-bit quants on 4 GB cards — quality suffers accordingly.
-4. In SwarmUI, select the GGUF model file from the model list (GGUF files in `diffusion_models` are listed like any model). The KREA-2 fork registers the loader nodes that understand Krea 2's ops, so the standard generation path works.
+4. Workflow: in SwarmUI select the GGUF model file from the model list (GGUF files in `diffusion_models` are listed like any model). The KREA-2 fork registers the loader nodes that understand Krea 2's ops, so the standard generation path works. If the text encoder isn't picked up automatically, open the ComfyUI workflow editor from SwarmUI and wire the fork's GGUF CLIP loader node for the text encoder manually.
 5. Expect slower sampling than fp8 safetensors — that's inherent to GGUF dequant. Keep the dtype patch on; combine with the Part 5 attention pack if VRAM is tight.
 
 > Note: SwarmUI also supports other Krea 2 quants natively (nvfp4 for tight memory, int8, bf16 for research). GGUF is only worth it if you specifically need its compression level.
@@ -251,7 +251,7 @@ The extension must survive image updates, so bind-mount it rather than cloning i
    then redeploy the app (`docker compose -f truenas-compose.yml --profile swarmui up -d` on the shell, or your usual update path).
 3. Watch the app logs at startup for:
    ```
-   [Init] V100Compat: Volta (sm_70) GPU detected...
+   [Init] V100Compat: pre-Ampere GPU (compute capability 7.x, no bf16) detected...
    [Init] V100Compat extension loaded.
    ```
    The upstream SwarmUI image builds on start, so a restart is normally enough. If the extension doesn't appear in the UI, exec in and check:
@@ -269,7 +269,7 @@ UI-driven — identical to the main guide. The FlashAttention node pack (Part 5)
 
 Per Part 6b, don't install the upstream city96 pack or TJ_NODE — your repo solved this with the **RealRebelAI/ComfyUI-GGUF_KREA-2** fork, and this extension now registers that same fork (not city96) as its installable feature. On nd-world:
 
-1. Run `./install-comfyui-gguf-krea2.sh` (it clones the fork into the backend's `custom_nodes`, removes any conflicting city96 install, and installs its requirements via the container venv), **or** install **ComfyUI-GGUF KREA-2 (fork)** from SwarmUI's installable features list — same result, but the script is what your compose setup documents.
+1. Run `./install-comfyui-gguf-krea2.sh` (it clones the fork into the backend's `custom_nodes`, removes any conflicting city96 install, and installs its requirements via the container venv), **or** install **ComfyUI-GGUF KREA-2 (fork — replaces built-in 'gguf')** from SwarmUI's installable features list — same result, but the script is what your compose setup documents. If you use the UI list, ignore SwarmUI's separate built-in `gguf` (city96) entry: an extension can't hide it, and installing both breaks ComfyUI (duplicate node class names).
 2. Use the **Krea 2 GGUF Quick Setup panel** on nd-world's Image Gen tab to download a BASE/TURBO diffusion GGUF + the Qwen3-VL-4B-Instruct text encoder into the shared models dataset (`/mnt/DeadPool/apps/swarmui/models`, mounted at `/SwarmUI/Models` for SwarmUI).
 3. Restart SwarmUI, pick the 'Krea 2 Turbo' Image Gen template in nd-world, generate — and keep the Part 4 dtype patch on.
 
