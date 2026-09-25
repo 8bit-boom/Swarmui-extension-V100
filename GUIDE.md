@@ -38,6 +38,8 @@ This guide takes you from a bare machine with a Tesla V100 / Titan V to generati
 
 Modern PyTorch **cu130 builds dropped sm_70**. With a cu130 torch, SwarmUI starts fine, the backend reports "ready", and then every generation dies with `RuntimeError: no kernel image is available for execution on the device`. Fix:
 
+> **nd-world on TrueNAS?** Your repo's `fix-swarmui-volta-torch.sh` already automates this part — run it and skip to Part 3. (Appendix A.2.)
+
 1. Find the ComfyUI backend venv:
    - Linux: `SwarmUI/dlbackend/comfy/venv/bin/python`
    - Windows: `SwarmUI\dlbackend\comfy\venv\Scripts\python.exe`
@@ -142,18 +144,21 @@ Krea 2 is a 12B dense DiT with a Qwen3-VL 4B text encoder and Qwen Image VAE. **
 
 ### 6b. GGUF setup (optional, memory-tight or experimental)
 
-GGUF trades speed for lower VRAM. Two files need loaders that aren't in ComfyUI core, which is why this extension registers them as installable features:
+GGUF trades speed for lower VRAM. Krea 2's GGUF files need a loader that isn't in ComfyUI core — and **not the upstream city96/ComfyUI-GGUF either**: it doesn't parse Krea 2's ops yet (city96#464), so generation fails against it. The working options:
 
-1. In SwarmUI's installable features list, install:
-   - **ComfyUI-GGUF** (city96) — the GGUF unet/clip loader pack, and
-   - **ComfyUI TJ_NODE** (designloves2) — the `KREA2 CLIP GGUF LOADER` node, needed because city96's pack *refuses to load the Qwen3-VL GGUF text encoder* (unrecognized `general.architecture` tag). The TJ loader borrows city96's `CLIPLoaderGGUF` class, so both packs must be present.
+- **ComfyUI-GGUF_KREA-2** ([RealRebelAI](https://github.com/RealRebelAI/ComfyUI-GGUF_KREA-2)) — a drop-in fork of city96's pack with Krea 2 support, including the Qwen3-VL GGUF text encoder. **Registered as an installable feature by this extension.** It shares node/class names with the upstream pack and **cannot coexist with it** — if SwarmUI previously auto-installed city96/ComfyUI-GGUF, remove that folder from `custom_nodes` before installing the fork.
+- **nd-world users**: your repo already has this covered — `install-comfyui-gguf-krea2.sh` installs the same fork (removing a conflicting upstream install automatically), and the Krea 2 GGUF Quick Setup panel on the Image Gen tab downloads the model files. Use that path; don't install the city96 pack or TJ_NODE on top of it.
+
+Steps for everyone else:
+
+1. In SwarmUI's installable features list, install **ComfyUI-GGUF KREA-2 (fork)** (registered by this extension). If you previously installed city96's pack, delete its folder from the ComfyUI `custom_nodes` directory first.
 2. Restart the backend.
-3. Download the GGUF files (see the links and community quants discussed in [city96/ComfyUI-GGUF issue #464](https://github.com/city96/ComfyUI-GGUF/issues/464), including the m8rr fork if you want GGUF text-encoder support without TJ_NODE):
+3. Download the GGUF files (see the links and community quants discussed in [city96/ComfyUI-GGUF issue #464](https://github.com/city96/ComfyUI-GGUF/issues/464)):
    - A Krea 2 (Raw or Turbo) GGUF diffusion model → `diffusion_models/`
    - Qwen3-VL 4B GGUF + its matching `.mmproj` file → `text_encoders/` (both files, same folder)
    - The VAE stays the normal `qwen_image_vae.safetensors` in `vae/`
    For a 16 GB V100, start with Q6_K/Q8_0; Q4_K_M or lower if you OOM. Community reports run 2-bit quants on 4 GB cards — quality suffers accordingly.
-4. Workflow: in SwarmUI select the GGUF model file from the model list (GGUF files in `diffusion_models` are listed like any model). If SwarmUI's standard Krea 2 path doesn't pick up your GGUF file's text encoder, open the ComfyUI workflow editor from SwarmUI and wire the **KREA2 CLIP GGUF LOADER (TJ)** node for the text encoder manually.
+4. In SwarmUI, select the GGUF model file from the model list (GGUF files in `diffusion_models` are listed like any model). The KREA-2 fork registers the loader nodes that understand Krea 2's ops, so the standard generation path works.
 5. Expect slower sampling than fp8 safetensors — that's inherent to GGUF dequant. Keep the dtype patch on; combine with the Part 5 attention pack if VRAM is tight.
 
 > Note: SwarmUI also supports other Krea 2 quants natively (nvfp4 for tight memory, int8, bf16 for research). GGUF is only worth it if you specifically need its compression level.
@@ -170,84 +175,107 @@ GGUF trades speed for lower VRAM. Two files need loaders that aren't in ComfyUI 
 | Black images / NaN warnings with a specific model | fp16 overflow on that model | Set **V100 Precision = fp32** for that model |
 | `CUDA out of memory` at 2K | Attention matrix too large | Use 1024–1536, or install the Part 5 attention pack |
 | `Could not detect model type` / model missing from list | Files in wrong folder or backend not restarted | Check Part 6 folder table; restart backend; Refresh |
-| Krea 2 GGUF diffusion loads but TE fails with unrecognized architecture | city96 pack gates unknown TE architectures | Install TJ_NODE (Part 6b) or the m8rr fork |
+| Krea 2 GGUF fails to generate / TE fails with unrecognized architecture | Upstream city96 pack doesn't parse Krea 2 ops | Use the ComfyUI-GGUF_KREA-2 fork (Part 6b); remove any city96 install first |
 | FlashAttn nodes missing in ComfyUI | Pack not installed / backend not restarted | Reinstall via installable features; restart backend |
 | Extension not visible in UI | Build didn't run | Run `update` or `launch-dev` (Part 3, step 2) and check startup log |
-| Extension gone after TrueNAS app update | Cloned into ephemeral image layer | Use a bind-mounted Extensions folder (Appendix A.3) |
 
 Logs to check when stuck:
 - SwarmUI: `SwarmUI/Logs/` (latest `launch.log`)
 - ComfyUI backend: `SwarmUI/dlbackend/comfy/comfyui.log`
-- Docker/TrueNAS: inside the container (or your `/Data` dataset) — see Appendix A.
 
 ---
 
 ## Part 8 — Updating & publishing
 
-**Updating the extension**: `cd SwarmUI/src/Extensions/V100Compat && git pull`, then run the `update` script (rebuild required — C# is compiled). On TrueNAS: `git -C <extensions-dataset>/V100Compat pull` + app restart (Appendix A.3).
+**Updating the extension**: `cd SwarmUI/src/Extensions/V100Compat && git pull`, then run the `update` script (rebuild required — C# is compiled).
 
-**Updating SwarmUI/ComfyUI**: run the `update` script normally, then re-verify Part 2's torch arch list — backend updates can re-pin cu130 torch. On TrueNAS, app updates rebuild the container from the image — anything not in a bind mount or the `/Data` dataset is lost (Appendix A.5).
+**Updating SwarmUI/ComfyUI**: run the `update` script normally, then re-verify Part 2's torch arch list — backend updates can re-pin cu130 torch.
 
 **Sharing with others**: after local testing, PR your repo into SwarmUI's [`extension_list.fds`](https://github.com/mcmonkeyprojects/SwarmUI/blob/master/launchtools/extension_list.fds) so it appears in the in-app extension list. Keep the MIT license, and make sure the README clearly documents the external connections this extension triggers (installable features download from GitHub only when the user clicks install).
 
 ---
 
-## Appendix A — TrueNAS SCALE (Docker) notes
+## Appendix A — nd-world on TrueNAS SCALE (your setup)
 
-This appendix adapts the guide for SwarmUI running as a Docker app on TrueNAS SCALE 24.10+ (Electric Eel, Docker-based apps). It assumes the standard SwarmUI container layout — if your catalog's image differs, adjust paths accordingly:
+This appendix adapts the guide to SwarmUI deployed through **nd-world's** `truenas-compose.yml` (the `swarmui` Compose profile) on TrueNAS SCALE 24.10+ (Electric Eel, Docker-based apps). Ground truth from that compose file:
 
-| Inside the container | What it is |
+| Item | Actual value |
 |---|---|
-| `/SwarmUI` | SwarmUI code (image layer — changes here are lost on image update) |
-| `/Data` | Persistent data volume: models, Output, and `dlbackend/comfy` (the ComfyUI backend + its venv) |
-| `/Data/dlbackend/comfy/venv/bin/python` | The ComfyUI backend Python (Parts 2 and 6) |
+| Image | `ghcr.io/mcmonkeyprojects/swarmui:latest` (upstream SwarmUI image) |
+| Container name | `ix-<your-app-name>-swarmui-1` on TrueNAS; `swarmui-1` on plain Compose |
+| SwarmUI code | `/SwarmUI` (image layer — changes here are lost on image update) |
+| Data volume | `/SwarmUI/Data` → `/mnt/DeadPool/apps/swarmui/data` |
+| Models | `/SwarmUI/Models` → `/mnt/DeadPool/apps/swarmui/models` |
+| ComfyUI backend | `/SwarmUI/dlbackend/ComfyUI` → `/mnt/DeadPool/apps/swarmui/dlbackend` (note the capital C — the backend *and its venv* persist on your dataset) |
+| Backend venv python | `/SwarmUI/dlbackend/ComfyUI/venv/bin/python` |
+| Watchtower | auto-update is deliberately disabled for the SwarmUI container (`com.centurylinklabs.watchtower.enable: "false"`) — an unpinned update can silently pull a CUDA-13 torch |
+| Port | 7801 |
 
-On TrueNAS, `/Data` is bind-mounted to a dataset you chose at install (e.g. `/mnt/tank/swarmui`). Find your app's actual mount: **Apps → your SwarmUI app → (edit) → Storage**, or shell into the box and run `docker inspect <container>`.
+You already have two helper scripts in the nd-world repo that cover Parts 2 and 6b — use them instead of the generic commands below where applicable.
 
 ### A.1 GPU passthrough
 
-Ensure the app has the V100 assigned: edit the app in the TrueNAS UI and add the GPU resource (requires the NVIDIA driver/container toolkit set up on the host — if SwarmUI already generates on your V100, this is done). Inside the container, `nvidia-smi` must be visible for the extension's auto-detection; if the image doesn't include it, the patch just defaults to OFF — enable it manually (Part 4).
+Your compose file has the wiring commented in-place: assign the V100 to the **swarmui** service from the TrueNAS app's Resources/GPU screen (per-service picker when built through the wizard), or uncomment the `deploy.resources.reservations.devices` block for a pasted-YAML Custom App. If SwarmUI already generates on your V100, this is done. `docs/GPU_SETUP.md` in nd-world has the full walkthrough, including VRAM-sharing sizing if ollama and swarmui run on the same 16 GB card simultaneously.
 
-### A.2 Part 2 (torch fix) in Docker
+If the container image lacks `nvidia-smi`, the extension's auto-detection defaults the patch to OFF — enable **V100 Compatibility Patch** manually (Part 4).
 
-Nothing changes except the path — run it against the container's venv, either from the TrueNAS shell via `docker exec`:
+### A.2 Part 2 (torch fix): use your existing script
+
+Your repo's `fix-swarmui-volta-torch.sh` (run from the TrueNAS shell) already does Part 2 end-to-end against the running container: it finds the `swarmui` container, checks `torch.cuda.get_arch_list()` for `sm_70`, and reinstalls torch/torchvision from the **cu126** index if missing (the script's comment notes cu126 as the safe CUDA-12.x choice for Volta; cu128 works too — both ship sm_70 kernels — but the script is what your setup is tested with, so prefer it):
 
 ```bash
-docker exec -it <swarmui-container> /Data/dlbackend/comfy/venv/bin/python -c "import torch; print(torch.__version__); print(torch.cuda.get_arch_list())"
-docker exec -it <swarmui-container> /Data/dlbackend/comfy/venv/bin/python -m pip install --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+./fix-swarmui-volta-torch.sh          # auto-finds the container
+# or explicitly:
+./fix-swarmui-volta-torch.sh ix-<your-app>-swarmui-1
 ```
 
-Because `/Data` is a persistent dataset, the fixed venv **survives container/image updates** — but re-verify after any SwarmUI app update, since backend updates can re-pin torch.
+It's idempotent — safe to re-run after any backend reinstall or custom-node install whose `requirements.txt` re-pulls a CUDA-13 torch (PyPI defaults to cu13 wheels now, which is exactly how this breaks). Because `dlbackend` is a bind-mounted dataset, the fixed venv survives container restarts and image updates.
 
-### A.3 Part 3 (extension install) in Docker
+### A.3 Part 3 (extension install) in your compose
 
-The extension must survive image updates, so don't clone into the ephemeral `/SwarmUI/src/Extensions`. Instead bind-mount it from your dataset:
+The extension must survive image updates, so bind-mount it rather than cloning into the ephemeral image layer:
 
 1. On the TrueNAS shell:
    ```bash
-   mkdir -p /mnt/tank/swarmui/extensions
-   git clone https://github.com/8bit-boom/Swarmui-extension-V100.git /mnt/tank/swarmui/extensions/V100Compat
+   mkdir -p /mnt/DeadPool/apps/swarmui/extensions
+   git clone https://github.com/8bit-boom/Swarmui-extension-V100.git /mnt/DeadPool/apps/swarmui/extensions/V100Compat
    ```
-2. In the TrueNAS UI, edit the SwarmUI app → **Storage** → add a Host Path mount:
-   - Host path: `/mnt/tank/swarmui/extensions`
-   - Container path: `/SwarmUI/src/Extensions`
-3. Restart the app. Rebuild behavior depends on the image:
-   - Many SwarmUI images build on startup — a restart is enough. Watch the app logs for `V100Compat extension loaded`.
-   - If not, exec in and build manually:
-     ```bash
-     docker exec -it <swarmui-container> bash
-     cd /SwarmUI && bash update-linux.sh   # or: dotnet build -c Release
-     ```
-     (If `dotnet` is missing in the container, the image doesn't ship the SDK — rebuild happens via the image entrypoint instead, or switch to an image that builds on start.)
+2. Add a Host Path mount to the `swarmui` service in `truenas-compose.yml` (sibling of the existing three):
+   ```yaml
+   volumes:
+     - /mnt/DeadPool/apps/swarmui/data:/SwarmUI/Data
+     - /mnt/DeadPool/apps/swarmui/models:/SwarmUI/Models
+     - /mnt/DeadPool/apps/swarmui/dlbackend:/SwarmUI/dlbackend
+     - /mnt/DeadPool/apps/swarmui/extensions:/SwarmUI/src/Extensions   # <-- add this
+   ```
+   then redeploy the app (`docker compose -f truenas-compose.yml --profile swarmui up -d` on the shell, or your usual update path).
+3. Watch the app logs at startup for:
+   ```
+   [Init] V100Compat: Volta (sm_70) GPU detected...
+   [Init] V100Compat extension loaded.
+   ```
+   The upstream SwarmUI image builds on start, so a restart is normally enough. If the extension doesn't appear in the UI, exec in and check:
+   ```bash
+   docker exec -it ix-<your-app>-swarmui-1 bash -c "cd /SwarmUI && bash update-linux.sh"
+   ```
 
-> Updating the extension later is just `git -C /mnt/tank/swarmui/extensions/V100Compat pull` + app restart (plus a rebuild per above).
+> Updating the extension later: `git -C /mnt/DeadPool/apps/swarmui/extensions/V100Compat pull` + restart the app.
 
-### A.4 Parts 4–7
+### A.4 Parts 4–5
 
-All UI-driven — identical in Docker. Log locations inside the container: `/SwarmUI/Logs/launch.log` and `/Data/dlbackend/comfy/comfyui.log`; on the host these live under your `/Data` dataset, so you can read them from the TrueNAS shell without entering the container.
+UI-driven — identical to the main guide. The FlashAttention node pack (Part 5) is registered by this extension as an installable feature and installs into the ComfyUI `custom_nodes` under `/SwarmUI/dlbackend/ComfyUI/custom_nodes` — which is on your persistent dataset, so it survives updates.
 
-### A.5 TrueNAS-specific gotchas
+### A.5 Krea 2 GGUF: your setup already has a tested path
 
-- **Image updates wipe non-mounted changes**: anything done via `docker exec` inside `/SwarmUI` (clones, builds) disappears when the catalog updates the app. Keep everything in the `/Data` dataset or bind mounts.
-- **Do not put models on an SMB-shared dataset** mid-sync; download Krea 2 files straight to the models dataset (Part 6) — Hugging Face downloads resume, so interrupted transfers are fine.
-- **Resource limits**: edit the app to give SwarmUI enough RAM (32 GB host RAM is comfortable; shrink if your NAS is small) and verify the V100's VRAM headroom — `nvidia-smi` from the TrueNAS shell shows host-wide usage.
+Per Part 6b, don't install the upstream city96 pack or TJ_NODE — your repo solved this with the **RealRebelAI/ComfyUI-GGUF_KREA-2** fork, and this extension now registers that same fork (not city96) as its installable feature. On nd-world:
+
+1. Run `./install-comfyui-gguf-krea2.sh` (it clones the fork into the backend's `custom_nodes`, removes any conflicting city96 install, and installs its requirements via the container venv), **or** install **ComfyUI-GGUF KREA-2 (fork)** from SwarmUI's installable features list — same result, but the script is what your compose setup documents.
+2. Use the **Krea 2 GGUF Quick Setup panel** on nd-world's Image Gen tab to download a BASE/TURBO diffusion GGUF + the Qwen3-VL-4B-Instruct text encoder into the shared models dataset (`/mnt/DeadPool/apps/swarmui/models`, mounted at `/SwarmUI/Models` for SwarmUI).
+3. Restart SwarmUI, pick the 'Krea 2 Turbo' Image Gen template in nd-world, generate — and keep the Part 4 dtype patch on.
+
+### A.6 TrueNAS-specific gotchas
+
+- **Watchtower is off for SwarmUI by design** — updates are manual, which protects the torch fix. When you do update the image, re-run `fix-swarmui-volta-torch.sh` afterward (idempotent) and re-verify the arch list.
+- **Everything lives on `/mnt/DeadPool/apps/swarmui/`** — back up that dataset and you back up models, backend venv (including the fixed torch), and the extension in one shot.
+- **Log locations (host-readable, no `docker exec` needed)**: `/mnt/DeadPool/apps/swarmui/data/Logs/launch.log` and `/mnt/DeadPool/apps/swarmui/dlbackend/ComfyUI/comfyui.log`.
+- **VRAM sharing**: with ollama also on the V100, mind `OLLAMA_MAX_LOADED_MODELS`/`OLLAMA_KEEP_ALIVE` and SwarmUI's concurrent-backend count — see `docs/GPU_SETUP.md` §3a for sizing guidance on a 16 GB card.
