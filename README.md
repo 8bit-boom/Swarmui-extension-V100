@@ -32,10 +32,26 @@ The V100 is still a capable card (16/32 GB HBM2, fast FP16 tensor cores), but it
 3. Open the UI → enable **Display Advanced Options** → find the **V100 / Volta Compatibility** group → confirm the patch is on.
 4. If fp16 gives you black/NaN images on a specific model, set **V100 Precision** to `fp32` for that model.
 
+## Experimental: FlashAttention-2 on the V100
+
+The official FlashAttention wheels don't support Volta, but there's an unofficial hand-written FA2 port for sm_70: [ai-bond/flash-attention-v100](https://github.com/ai-bond/flash-attention-v100). It exposes the same API (`flash_attn_func`, `flash_attn_varlen_func`, ...) as the official package.
+
+**Treat this as experimental.** It's a self-described "from scratch, for self education" project with no test suite — silently wrong attention output is worse than slow attention. Verify outputs against `--use-pytorch-cross-attention` before trusting it.
+
+If you want to try it:
+
+1. Build & install it into your ComfyUI venv per the repo's `install.md` (it compiles CUDA kernels for sm_70; you need the CUDA toolkit and ~matching torch version).
+2. ComfyUI's `--use-flash-attention` flag does a plain `import flash_attn`, but the port installs as `flash_attn_v100`. Add a shim so the import succeeds — create `flash_attn.py` in your venv's site-packages:
+   ```python
+   from flash_attn_v100 import *  # noqa: F401,F403
+   ```
+3. In SwarmUI: **Server → Backends → Configure** your ComfyUI backend and add `--use-flash-attention` to the extra args (remove `--use-pytorch-cross-attention` if set).
+4. Keep this extension's dtype patch enabled regardless — FlashAttention does not fix bf16 problems, and the two fixes operate at different layers (memory/speed vs dtype compatibility).
+
 ## Notes & manual steps the extension can't do for you
 
 - **Keep your ComfyUI's PyTorch on a cu128 or older build** (see above). cu130+ has no sm_70 kernels at all, and no workflow patch can fix that.
-- Avoid ComfyUI launch args that request Volta-unsupported features, e.g. don't use `--use-flash-attention` / SageAttention on a V100; `--use-pytorch-cross-attention` is the safe attention backend.
+- Avoid ComfyUI launch args that request Volta-unsupported features, e.g. SageAttention / `torch.compile` won't work on a V100; `--use-pytorch-cross-attention` is the safe default attention backend (with the experimental FA2-V100 route described above as an alternative).
 - The `dtype` widget of `ModelComputeDtype` expects a string such as `fp16`/`fp32`. If your ComfyUI version is very old and lacks this core node, update ComfyUI first.
 
 ## License
