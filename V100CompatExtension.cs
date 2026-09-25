@@ -23,6 +23,11 @@ namespace V100Compat;
 /// This extension inserts ComfyUI's core "ModelComputeDtype" node right after
 /// the base model is loaded, forcing a V100-native dtype (fp16 by default,
 /// fp32 as a safe fallback for models that NaN in fp16).
+///
+/// It also registers related ComfyUI node packs as opt-in installable features:
+/// - ComfyUI Flash-Attention V100 (experimental Volta FlashAttention node pack)
+/// - ComfyUI-GGUF (city96) + ComfyUI-TJ_NODE (Krea2 Qwen3-VL GGUF TE loader)
+///   for Krea 2 GGUF support. Krea 2 itself is natively supported by SwarmUI.
 /// </summary>
 public class V100CompatExtension : Extension
 {
@@ -96,6 +101,19 @@ public class V100CompatExtension : Extension
             "comfyui-flash-attention-v100",
             "https://github.com/NetVoobrazhenia/ComfyUI_Flash-Attention_v100",
             "NetVoobrazhenia"));
+
+        // Krea 2 GGUF support: SwarmUI core already detects Krea 2 models (Raw and Turbo),
+        // but loading GGUF files needs city96's GGUF loader pack, and Krea 2's Qwen3-VL text
+        // encoder in GGUF form is gated behind an extra loader node (city96's pack refuses
+        // unrecognized architectures). Register both as opt-in installable features.
+        InstallableFeatures.RegisterInstallableFeature(new("ComfyUI-GGUF",
+            "comfyui-gguf",
+            "https://github.com/city96/ComfyUI-GGUF",
+            "city96"));
+        InstallableFeatures.RegisterInstallableFeature(new("ComfyUI TJ_NODE (Krea2 CLIP GGUF loader)",
+            "comfyui-tj-node",
+            "https://github.com/designloves2/ComfyUI-TJ_NODE",
+            "designloves2"));
 
         Logs.Init("V100Compat extension loaded.");
     }
