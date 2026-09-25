@@ -173,17 +173,81 @@ GGUF trades speed for lower VRAM. Two files need loaders that aren't in ComfyUI 
 | Krea 2 GGUF diffusion loads but TE fails with unrecognized architecture | city96 pack gates unknown TE architectures | Install TJ_NODE (Part 6b) or the m8rr fork |
 | FlashAttn nodes missing in ComfyUI | Pack not installed / backend not restarted | Reinstall via installable features; restart backend |
 | Extension not visible in UI | Build didn't run | Run `update` or `launch-dev` (Part 3, step 2) and check startup log |
+| Extension gone after TrueNAS app update | Cloned into ephemeral image layer | Use a bind-mounted Extensions folder (Appendix A.3) |
 
 Logs to check when stuck:
 - SwarmUI: `SwarmUI/Logs/` (latest `launch.log`)
 - ComfyUI backend: `SwarmUI/dlbackend/comfy/comfyui.log`
+- Docker/TrueNAS: inside the container (or your `/Data` dataset) — see Appendix A.
 
 ---
 
 ## Part 8 — Updating & publishing
 
-**Updating the extension**: `cd SwarmUI/src/Extensions/V100Compat && git pull`, then run the `update` script (rebuild required — C# is compiled).
+**Updating the extension**: `cd SwarmUI/src/Extensions/V100Compat && git pull`, then run the `update` script (rebuild required — C# is compiled). On TrueNAS: `git -C <extensions-dataset>/V100Compat pull` + app restart (Appendix A.3).
 
-**Updating SwarmUI/ComfyUI**: run the `update` script normally, then re-verify Part 2's torch arch list — backend updates can re-pin cu130 torch.
+**Updating SwarmUI/ComfyUI**: run the `update` script normally, then re-verify Part 2's torch arch list — backend updates can re-pin cu130 torch. On TrueNAS, app updates rebuild the container from the image — anything not in a bind mount or the `/Data` dataset is lost (Appendix A.5).
 
 **Sharing with others**: after local testing, PR your repo into SwarmUI's [`extension_list.fds`](https://github.com/mcmonkeyprojects/SwarmUI/blob/master/launchtools/extension_list.fds) so it appears in the in-app extension list. Keep the MIT license, and make sure the README clearly documents the external connections this extension triggers (installable features download from GitHub only when the user clicks install).
+
+---
+
+## Appendix A — TrueNAS SCALE (Docker) notes
+
+This appendix adapts the guide for SwarmUI running as a Docker app on TrueNAS SCALE 24.10+ (Electric Eel, Docker-based apps). It assumes the standard SwarmUI container layout — if your catalog's image differs, adjust paths accordingly:
+
+| Inside the container | What it is |
+|---|---|
+| `/SwarmUI` | SwarmUI code (image layer — changes here are lost on image update) |
+| `/Data` | Persistent data volume: models, Output, and `dlbackend/comfy` (the ComfyUI backend + its venv) |
+| `/Data/dlbackend/comfy/venv/bin/python` | The ComfyUI backend Python (Parts 2 and 6) |
+
+On TrueNAS, `/Data` is bind-mounted to a dataset you chose at install (e.g. `/mnt/tank/swarmui`). Find your app's actual mount: **Apps → your SwarmUI app → (edit) → Storage**, or shell into the box and run `docker inspect <container>`.
+
+### A.1 GPU passthrough
+
+Ensure the app has the V100 assigned: edit the app in the TrueNAS UI and add the GPU resource (requires the NVIDIA driver/container toolkit set up on the host — if SwarmUI already generates on your V100, this is done). Inside the container, `nvidia-smi` must be visible for the extension's auto-detection; if the image doesn't include it, the patch just defaults to OFF — enable it manually (Part 4).
+
+### A.2 Part 2 (torch fix) in Docker
+
+Nothing changes except the path — run it against the container's venv, either from the TrueNAS shell via `docker exec`:
+
+```bash
+docker exec -it <swarmui-container> /Data/dlbackend/comfy/venv/bin/python -c "import torch; print(torch.__version__); print(torch.cuda.get_arch_list())"
+docker exec -it <swarmui-container> /Data/dlbackend/comfy/venv/bin/python -m pip install --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+```
+
+Because `/Data` is a persistent dataset, the fixed venv **survives container/image updates** — but re-verify after any SwarmUI app update, since backend updates can re-pin torch.
+
+### A.3 Part 3 (extension install) in Docker
+
+The extension must survive image updates, so don't clone into the ephemeral `/SwarmUI/src/Extensions`. Instead bind-mount it from your dataset:
+
+1. On the TrueNAS shell:
+   ```bash
+   mkdir -p /mnt/tank/swarmui/extensions
+   git clone https://github.com/8bit-boom/Swarmui-extension-V100.git /mnt/tank/swarmui/extensions/V100Compat
+   ```
+2. In the TrueNAS UI, edit the SwarmUI app → **Storage** → add a Host Path mount:
+   - Host path: `/mnt/tank/swarmui/extensions`
+   - Container path: `/SwarmUI/src/Extensions`
+3. Restart the app. Rebuild behavior depends on the image:
+   - Many SwarmUI images build on startup — a restart is enough. Watch the app logs for `V100Compat extension loaded`.
+   - If not, exec in and build manually:
+     ```bash
+     docker exec -it <swarmui-container> bash
+     cd /SwarmUI && bash update-linux.sh   # or: dotnet build -c Release
+     ```
+     (If `dotnet` is missing in the container, the image doesn't ship the SDK — rebuild happens via the image entrypoint instead, or switch to an image that builds on start.)
+
+> Updating the extension later is just `git -C /mnt/tank/swarmui/extensions/V100Compat pull` + app restart (plus a rebuild per above).
+
+### A.4 Parts 4–7
+
+All UI-driven — identical in Docker. Log locations inside the container: `/SwarmUI/Logs/launch.log` and `/Data/dlbackend/comfy/comfyui.log`; on the host these live under your `/Data` dataset, so you can read them from the TrueNAS shell without entering the container.
+
+### A.5 TrueNAS-specific gotchas
+
+- **Image updates wipe non-mounted changes**: anything done via `docker exec` inside `/SwarmUI` (clones, builds) disappears when the catalog updates the app. Keep everything in the `/Data` dataset or bind mounts.
+- **Do not put models on an SMB-shared dataset** mid-sync; download Krea 2 files straight to the models dataset (Part 6) — Hugging Face downloads resume, so interrupted transfers are fine.
+- **Resource limits**: edit the app to give SwarmUI enough RAM (32 GB host RAM is comfortable; shrink if your NAS is small) and verify the V100's VRAM headroom — `nvidia-smi` from the TrueNAS shell shows host-wide usage.
