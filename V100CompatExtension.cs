@@ -88,6 +88,15 @@ public class V100CompatExtension : Extension
             g.LoadingModel = [dtypeNode, 0]; // Every later step (sampler, refiner) now uses the fixed model
         }, -50);
 
+        // Register the ComfyUI custom-node FlashAttention pack as an installable feature,
+        // so users can install it from SwarmUI (Server area / alongside the ComfyUI backend)
+        // instead of manually cloning into custom_nodes. Not auto-installed: it is an
+        // unofficial kernel, so the user should opt in deliberately.
+        InstallableFeatures.RegisterInstallableFeature(new("ComfyUI Flash-Attention V100",
+            "comfyui-flash-attention-v100",
+            "https://github.com/NetVoobrazhenia/ComfyUI_Flash-Attention_v100",
+            "NetVoobrazhenia"));
+
         Logs.Init("V100Compat extension loaded.");
     }
 
