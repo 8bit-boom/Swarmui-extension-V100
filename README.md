@@ -20,6 +20,7 @@ The V100 is still a capable card (16/32 GB HBM2, fast FP16 tensor cores), but it
   - **V100 Compatibility Patch** — on by default when a Volta GPU is detected. Inserts ComfyUI's core `ModelComputeDtype` node immediately after base model loading (model-gen step priority `-50`, after the loader at `-100` but before sampling), so every downstream node (sampler, refiner, etc.) gets a V100-safe dtype.
   - **V100 Precision** — `fp16` (default, ~4x faster on Volta tensor cores) or `fp32` (safe fallback for the few models that NaN/overflow in fp16).
 - Registers **ComfyUI Flash-Attention V100** (the experimental node pack) as an installable feature, so it can be installed from within SwarmUI after you install this extension — no manual `custom_nodes` cloning.
+- Registers **ComfyUI-GGUF** (city96) and **ComfyUI-TJ_NODE** (Krea2 Qwen3-VL GGUF text-encoder loader) as installable features for **Krea 2 GGUF** support — see the [detailed guide](GUIDE.md). Krea 2 itself (Raw/Turbo) is already natively supported by SwarmUI; GGUF just needs these loader packs.
 - On non-Volta machines it stays completely inert unless you manually enable the toggle.
 
 ## Installation
