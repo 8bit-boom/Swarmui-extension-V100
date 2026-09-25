@@ -9,7 +9,8 @@ namespace V100Compat;
 
 /// <summary>
 /// SwarmUI extension that patches ComfyUI workflows so they run correctly on
-/// NVIDIA Volta (sm_70) cards such as the Tesla V100 / Titan V.
+/// pre-Ampere NVIDIA cards (compute capability 7.x: Volta — Tesla V100, Titan V;
+/// Turing — RTX 20xx, T4). All of them lack bf16 compute.
 ///
 /// Why the V100 needs this:
 /// - Volta has NO bf16 compute. bf16 is silently emulated via fp32, which is
@@ -36,15 +37,15 @@ public class V100CompatExtension : Extension
     public static T2IRegisteredParam<string> Precision;
     public static T2IParamGroup V100Group;
 
-    /// <summary>Set true when a Volta-class (compute capability 7.x) GPU is detected on this machine.</summary>
-    public static bool IsVolta = false;
+    /// <summary>Set true when a pre-Ampere GPU (compute capability 7.x — Volta 7.0 or Turing 7.5) is detected.</summary>
+    public static bool IsLegacyGpu = false;
 
     public override void OnPreInit()
     {
-        IsVolta = DetectVoltaGpu();
-        if (IsVolta)
+        IsLegacyGpu = DetectNoBf16Gpu();
+        if (IsLegacyGpu)
         {
-            Logs.Init("V100Compat: Volta (sm_70) GPU detected. Enable 'V100 Compatibility Patch' in generation parameters (or Server tab > Backends) to force V100-safe precision, and make sure your PyTorch is a cu128 (or older) build - cu130 wheels dropped sm_70 support.");
+            Logs.Init("V100Compat: pre-Ampere GPU (compute capability 7.x, no bf16) detected. Enable 'V100 Compatibility Patch' in generation parameters (or Server tab > Backends) to force bf16-free precision, and make sure your PyTorch is a cu128 (or older) build - cu130+ wheels dropped sm_70 support.");
         }
     }
 
@@ -53,13 +54,13 @@ public class V100CompatExtension : Extension
         // The group shows under Advanced Options in the Text2Image tab.
         V100Group = new("V100 / Volta Compatibility", Toggles: false, Open: true, IsAdvanced: true);
 
-        // Default the patch to ON when we detected a Volta card, OFF otherwise
+        // Default the patch to ON when we detected a pre-Ampere card, OFF otherwise
         // (so the extension is inert on Ampere+ machines unless the user opts in).
         EnablePatch = T2IParamTypes.Register<bool>(new("V100 Compatibility Patch",
             "Inserts a ModelComputeDtype node after base model loading to force a V100-safe compute dtype. " +
             "Use this on Tesla V100 / Titan V (Volta, no bf16 support) if you see bf16 dtype errors, " +
             "'expected scalar type Half but found BFloat16', or ~4x slowdowns from silent fp32 fallback.",
-            IsVolta ? "true" : "false", Toggleable: true, Group: V100Group, FeatureFlag: "comfyui"));
+            IsLegacyGpu ? "true" : "false", Toggleable: true, Group: V100Group, FeatureFlag: "comfyui"));
 
         Precision = T2IParamTypes.Register<string>(new("V100 Precision",
             "Compute dtype to force when the V100 Compatibility Patch is active. " +
@@ -108,7 +109,11 @@ public class V100CompatExtension : Extension
         // The RealRebelAI/ComfyUI-GGUF_KREA-2 fork is a drop-in replacement with Krea 2
         // support (incl. the Qwen3-VL GGUF text encoder). It shares node/class names with
         // the upstream pack - DO NOT install both; this one supersedes it.
-        InstallableFeatures.RegisterInstallableFeature(new("ComfyUI-GGUF KREA-2 (fork)",
+        // NOTE: SwarmUI's built-in "gguf" (city96) installable feature will still appear
+        // in the list alongside this one - an extension can't unregister someone else's
+        // entry. The conflict warning lives in the README/guide; the feature name below
+        // deliberately says "(replaces built-in 'gguf')" so the list itself hints at it.
+        InstallableFeatures.RegisterInstallableFeature(new("ComfyUI-GGUF KREA-2 (fork — replaces built-in 'gguf')",
             "comfyui-gguf-krea2",
             "https://github.com/RealRebelAI/ComfyUI-GGUF_KREA-2",
             "RealRebelAI"));
@@ -116,8 +121,13 @@ public class V100CompatExtension : Extension
         Logs.Init("V100Compat extension loaded.");
     }
 
-    /// <summary>Detects any Volta-class GPU (compute capability 7.x, e.g. V100/Titan V) via nvidia-smi.</summary>
-    public static bool DetectVoltaGpu()
+    /// <summary>
+    /// Detects any pre-Ampere GPU (compute capability 7.x — Volta 7.0 e.g. V100/Titan V,
+    /// or Turing 7.5 e.g. RTX 20xx/T4) via nvidia-smi. Both lack bf16 compute (that arrived
+    /// with Ampere/sm_80), so the patch applies to either; the log message says so honestly
+    /// instead of claiming "Volta".
+    /// </summary>
+    public static bool DetectNoBf16Gpu()
     {
         try
         {
@@ -137,7 +147,8 @@ public class V100CompatExtension : Extension
             proc.WaitForExit(5000);
             foreach (string line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                // Volta = 7.0 (V100/Titan V). Anything 8.0+ (Ampere+) has native bf16 and needs no patch.
+                // 7.0 = Volta (V100/Titan V), 7.5 = Turing (RTX 20xx/T4) — neither has bf16.
+                // Anything 8.0+ (Ampere+) has native bf16 and needs no patch.
                 if (line.StartsWith("7."))
                 {
                     return true;
