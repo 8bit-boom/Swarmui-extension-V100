@@ -143,8 +143,16 @@ public class V100CompatExtension : Extension
             {
                 return false;
             }
-            string output = proc.StandardOutput.ReadToEnd();
-            proc.WaitForExit(5000);
+            // ReadToEnd() blocks until the process exits, so the timeout must be on
+            // WaitForExit FIRST — otherwise a hung nvidia-smi (driver init issues, zombie
+            // GPU) would hang extension init forever. Kill it if it outstays the timeout.
+            System.Threading.Tasks.Task<string> read = proc.StandardOutput.ReadToEndAsync();
+            if (!proc.WaitForExit(5000))
+            {
+                try { proc.Kill(); } catch { }
+                return false;
+            }
+            string output = read.GetAwaiter().GetResult(); // process exited; stream is closing
             foreach (string line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
                 // 7.0 = Volta (V100/Titan V), 7.5 = Turing (RTX 20xx/T4) — neither has bf16.
